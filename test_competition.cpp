@@ -9,6 +9,48 @@
 #include <iostream>
 #include "competition.h"
 #include "test_competition.h"
+
+int test_compare_cpu_2(){
+
+	int *alphabet=new int[competition::ALPHABET];
+	int *partition=new int [competition::NUM_RULES];
+
+
+	int *alphabet2=new int[competition::ALPHABET];
+	int *partition2=new int [competition::NUM_RULES];
+	competition::reset_partition(partition,alphabet);
+	competition::reset_partition(partition2,alphabet2);
+
+	//Generate random rules
+	int *rules_size = new int[competition::NUM_RULES+1];
+	int total_lhs=competition::initialize_rules (rules_size, competition::NUM_RULES+1);
+
+	int *lhs_object=new int[total_lhs];
+	competition::initialize_lhs(lhs_object,total_lhs);
+
+	std::cout<< "------ Testing CPU competition version 2 ------"<< std::endl;
+
+	competition::print_header();
+	competition::print_rules(rules_size,lhs_object);
+
+    competition::make_partition(partition,rules_size,lhs_object,total_lhs,alphabet);
+	competition::make_partition_2(partition2,rules_size,lhs_object,total_lhs,alphabet2);
+
+	competition::print_comparing_partition(partition,alphabet,partition2,alphabet2);
+	competition::compare_partition(partition,alphabet,partition2,alphabet2);
+	std::cout<< std::endl;
+
+	delete [] rules_size;
+	delete [] lhs_object;
+	delete [] partition;
+	delete [] alphabet;
+	delete [] partition2;
+	delete [] alphabet2;
+	return 0;
+
+}
+
+
 int test_compare_cpu_gpu(){
 
 	int *alphabet=new int[competition::ALPHABET];
@@ -30,6 +72,7 @@ int test_compare_cpu_gpu(){
 	std::cout<< "------ Testing GPU competition version 1 ------"<< std::endl;
 
 	competition::print_header();
+	competition::print_rules(rules_size,lhs_object);
 
     competition::make_partition(partition,rules_size,lhs_object,total_lhs,alphabet);
 	competition::make_partition_gpu(partition2,rules_size,lhs_object,total_lhs,alphabet2);
@@ -116,7 +159,11 @@ int test_compare_cpu_gpu_random(){
 
 		competition::make_partition_gpu(partition2,rules_size,lhs_object,total_lhs,alphabet2);
 
-		competition::compare_partition(partition,alphabet,partition2,alphabet2);
+		int* normalized_cpu_partition=competition::normalize_partition(partition);
+		int* normalized_gpu_partition=competition::normalize_partition(partition2);
+
+		competition::compare_partition(normalized_cpu_partition,alphabet,normalized_gpu_partition,alphabet2);
+
 
 
 		delete [] rules_size;

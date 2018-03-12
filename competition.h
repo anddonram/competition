@@ -25,6 +25,7 @@ void reset_partition(int* partition,int* alphabet);
 int initialize_rules(int *data, int size);
 void initialize_lhs(int *data, int size);
 void make_partition(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet);
+void make_partition_2(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet);
 void make_partition_gpu(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet,bool version2=false);
 
 bool check_compete(int block_a,int block_b, int* rules_size,int * lhs_object);

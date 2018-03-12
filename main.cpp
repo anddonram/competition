@@ -48,10 +48,12 @@ int main(int argc, char** argv)
 //		matrices::test_matrix_product();
 //		matrices::test_matrix_pow();
 //		matrices::test_competition_matrix();
-		test_compare_cpu_gpu();
+	//	test_compare_cpu_2();
 	//	test_compare_cpu_gpu_2();
-//		test_normalize_partition_2();
-	//	test_normalize_partition();
+	//	test_compare_cpu_gpu();
+	//	test_normalize_partition_2();
+		test_normalize_partition();
+
 
 		test_compare_cpu_gpu_random();
 		//test_compare_cpu_gpu_2_random();

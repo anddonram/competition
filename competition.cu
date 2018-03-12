@@ -16,7 +16,14 @@
 
 
 namespace competition{
+__global__ void make_partition_phase_1_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET);
+__global__ void make_partition_phase_1_5_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET);
+__global__ void make_partition_phase_2_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET);
+__global__ void get_partition_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES);
 
+
+__global__ void make_partition_phase1_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET,int i);
+__global__ void make_partition_phase2_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET,int i);
 static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t);
 #define CUDA_CHECK_RETURN(value) CheckCudaErrorAux(__FILE__,__LINE__, #value, value)
 
@@ -42,6 +49,101 @@ void set_max_obj_per_rule(int set){
 void set_alphabet(int set){
 	ALPHABET=set;
 }
+
+__device__ bool change=true;
+/**
+ * https://pdfs.semanticscholar.org/4569/2750cb1bf50da6451e70ae06b6519992e4ec.pdf
+ * CUDA kernel that computes partition for overlapping rules
+ */
+__global__ void make_partition_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
+	static const int BLOCK_SIZE = 256;
+	const int blockCount1 = (NUM_RULES+BLOCK_SIZE-1)/BLOCK_SIZE;
+	const int blockCount2 = (ALPHABET+BLOCK_SIZE-1)/BLOCK_SIZE;
+	change=true;
+	bool exit_loop=false;
+
+
+	while(change || !exit_loop){
+
+		//If nothing changed, we must give a last pass
+		exit_loop=!change;
+		change=false;
+		make_partition_phase_1_kernel_3<<<blockCount1,BLOCK_SIZE>>>( partition, rules_size, lhs_object, alphabet, NUM_RULES, ALPHABET);
+		make_partition_phase_1_5_kernel_3<<<blockCount1,BLOCK_SIZE>>>( partition, rules_size, lhs_object, alphabet, NUM_RULES, ALPHABET);
+		make_partition_phase_2_kernel_3<<<blockCount2,BLOCK_SIZE>>>( partition,  rules_size, lhs_object, alphabet, NUM_RULES, ALPHABET);
+
+		cudaDeviceSynchronize();
+//		printf("iter:\n");
+//		for(int i=0;i<ALPHABET;i++)
+//		{
+//			printf("%3u, ",i);
+//
+//		}
+//		printf("\n");
+//		for(int i=0;i<ALPHABET;i++)
+//		{
+//			printf("%3u, ",alphabet[i]);
+//		}
+//		printf("\n");
+	}
+
+	get_partition_kernel<<<blockCount1, BLOCK_SIZE>>> (partition,rules_size,lhs_object,alphabet,NUM_RULES);
+
+}
+__global__ void make_partition_phase_1_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+
+	if (idx < NUM_RULES){
+
+		unsigned rule_id_begin=rules_size[idx];
+		unsigned rule_id_end=rules_size[idx+1];
+		int val=ALPHABET;
+
+		for (unsigned int k=rule_id_begin; k<rule_id_end; k++){
+			val=min(val,alphabet[lhs_object[k]]);
+		}
+
+		partition[idx]=val;
+
+	}
+}
+__global__ void make_partition_phase_1_5_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+
+	if (idx < NUM_RULES){
+
+		unsigned rule_id_begin=rules_size[idx];
+		unsigned rule_id_end=rules_size[idx+1];
+
+		unsigned val=partition[idx];
+
+		for (unsigned int j=rule_id_begin; j<rule_id_end; j++){
+			int old_val=atomicMin((alphabet+lhs_object[j]),val);
+			if(old_val!=val)
+				change=true;
+		}
+
+
+	}
+}
+__global__ void make_partition_phase_2_kernel_3(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+	if (idx < ALPHABET){
+		int i =alphabet[idx];
+		int i_1 =alphabet[i];
+		bool must_go_on=false;
+		while(i_1!=i)
+		{
+			must_go_on=true;
+			i=i_1;
+			i_1=alphabet[i];
+		}
+		atomicMin(alphabet+idx,i_1);
+		if(must_go_on){
+			change=true;
+		}
+	}
+}
 /**
  * CUDA kernel that computes partition for overlapping rules
  * Each thread takes a rule, then all iterate over each other rule
@@ -50,7 +152,7 @@ void set_alphabet(int set){
  * It does not work correctly
  *
  */
-__global__ void make_partition_kernel_2(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet,int NUM_RULES,int ALPHABET) {
+__global__ void make_partition_kernel_2(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
 
 	if (idx < NUM_RULES){
@@ -70,7 +172,6 @@ __global__ void make_partition_kernel_2(int* partition, int* rules_size, int*lhs
 				for (unsigned int k=rule_id_begin; k<rule_id_end; k++){
 					if(object_to_compare==lhs_object[k] ){
 						atomicMin(partition+i,partition[idx]);
-						__syncthreads();
 						atomicMin(partition+idx,partition[i]);
 						break;
 
@@ -85,7 +186,6 @@ __global__ void make_partition_kernel_2(int* partition, int* rules_size, int*lhs
 
 	}
 }
-
 /**
  * CUDA kernel that partition of rules
  * We want to determine the components of a disconnected graph (in the sense of rules having no objects in common)
@@ -93,10 +193,27 @@ __global__ void make_partition_kernel_2(int* partition, int* rules_size, int*lhs
  * set its value in the connected graph to the smallest value among the objects in its rule
  * Finally, each rule takes one object and get its value (component of the graph)
  *
-
- * It does not work correctly
+ * It does not work properly
  */
-__global__ void make_partition_kernel(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet,int NUM_RULES,int ALPHABET,int i) {
+
+__global__ void make_partition_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET) {
+	static const int BLOCK_SIZE = 256;
+	const int blockCount1 = (NUM_RULES+BLOCK_SIZE-1)/BLOCK_SIZE;
+	const int blockCount2 = (ALPHABET+BLOCK_SIZE-1)/BLOCK_SIZE;
+    	for(int i=0;i<ALPHABET;i++){
+
+			make_partition_phase1_kernel<<<blockCount1, BLOCK_SIZE>>> (partition,rules_size,lhs_object,alphabet,NUM_RULES,ALPHABET,i);
+			make_partition_phase2_kernel<<<blockCount1, BLOCK_SIZE>>> (partition,rules_size,lhs_object,alphabet,NUM_RULES,ALPHABET,i);
+		//	make_partition_phase_2_kernel_3<<<blockCount2,BLOCK_SIZE>>>( partition,  rules_size, lhs_object, alphabet, NUM_RULES, ALPHABET);
+			cudaDeviceSynchronize();
+		}
+		get_partition_kernel<<<blockCount1, BLOCK_SIZE>>> (partition,rules_size,lhs_object,alphabet,NUM_RULES);
+
+}
+/*
+* First phase: find rules with object i and set the i to the minimum
+*/
+__global__ void make_partition_phase1_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET,int i) {
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
 	if (idx < NUM_RULES){
 		unsigned rule_id_begin=rules_size[idx];
@@ -116,8 +233,26 @@ __global__ void make_partition_kernel(int* partition, int* rules_size, int*lhs_o
 				//printf("matches with rule %i \n",idx);
 				//Pass the min for each rule to the object
 				atomicMin(alphabet+i,min_val);
+			}
 
-				min_val=alphabet[i];
+	}
+}
+/**
+ * Second phase: find rules with object i and set the other objects to i value
+ */
+__global__ void make_partition_phase2_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES,int ALPHABET,int i) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+	if (idx < NUM_RULES){
+		unsigned rule_id_begin=rules_size[idx];
+		unsigned rule_id_end=rules_size[idx+1];
+
+			bool found=false;
+			for (unsigned int k=rule_id_begin; k<rule_id_end; k++){
+				found=found||i==lhs_object[k];
+			}
+
+			if(found){
+				int min_val=alphabet[i];
 				//Propagate that min value to all other adjacent objects
 				for (unsigned int l=rule_id_begin; l<rule_id_end; l++){
 					alphabet[lhs_object[l]]=min_val;
@@ -126,6 +261,11 @@ __global__ void make_partition_kernel(int* partition, int* rules_size, int*lhs_o
 
 			}
 
+	}
+}
+__global__ void get_partition_kernel(int* partition, int* rules_size, int*lhs_object,int * alphabet,int NUM_RULES) {
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+	if (idx < NUM_RULES){
 
 		partition[idx]=alphabet[lhs_object[rules_size[idx]]];
 		//printf("set rule %i with object and partition %i %i \n",idx,lhs_object[rules_size[idx]],partition[idx]);
@@ -161,11 +301,10 @@ void make_partition_gpu(int* partition, int* rules_size, int*lhs_object, int tot
     cpu_startTime = clock();
 
     if(version2){
-    	make_partition_kernel_2<<<blockCount, BLOCK_SIZE>>> (d_partition,d_rules_size,d_lhs_object,total_lhs,d_alphabet,NUM_RULES,ALPHABET);
+    	make_partition_kernel_2<<<blockCount, BLOCK_SIZE>>> (d_partition,d_rules_size,d_lhs_object,d_alphabet,NUM_RULES,ALPHABET);
     }else{
-		for(int i=0;i<ALPHABET;i++){
-			make_partition_kernel<<<blockCount, BLOCK_SIZE>>> (d_partition,d_rules_size,d_lhs_object,total_lhs,d_alphabet,NUM_RULES,ALPHABET,i);
-		}
+    	make_partition_kernel_3<<<1,1>>>(d_partition,d_rules_size,d_lhs_object,d_alphabet,NUM_RULES,ALPHABET);
+    	//make_partition_kernel<<<1,1>>>(d_partition,d_rules_size,d_lhs_object,d_alphabet,NUM_RULES,ALPHABET);
     }
     cudaDeviceSynchronize();
 
@@ -204,7 +343,11 @@ void initialize_lhs(int *data, int size)
 	}
 
 }
-void make_partition(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet){
+/*
+ * Sequential of partition kernel version 1
+ * Does not work correctly
+ * */
+void make_partition_2(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet){
 	for(int i=0;i<ALPHABET;i++){
 
 		int abs_min=alphabet[i];
@@ -241,16 +384,53 @@ void make_partition(int* partition, int* rules_size, int*lhs_object, int total_l
 	for(int i=0;i<NUM_RULES;i++){
 			partition[i]=alphabet[lhs_object[rules_size[i]]];
 	}
-	//NOT USEFUL ANYMORE
-//	for(int i=0;i<NUM_RULES;i++){
-//		for(int j=i+1;j<NUM_RULES;j++){
-//			if(check_compete(i,j,rules_size,lhs_object)){
-//				partition[j]=partition[i];
-//			}
-//
-//		}
-//	}
+
 }
+/**
+ * Modified sequential version of partition kernel version 3
+ * It works
+ */
+void make_partition(int* partition, int* rules_size, int*lhs_object, int total_lhs,int * alphabet){
+	bool change=true;
+	bool exit_loop=false;
+
+	while(change || !exit_loop){
+
+		//If nothing changed, we must give a last pass
+		exit_loop=!change;
+		change=false;
+
+		for(int i=0;i<NUM_RULES;i++){
+			for(int j=i+1;j<NUM_RULES;j++){
+				if(partition[j]!=partition[i] && check_compete(i,j,rules_size,lhs_object)){
+					if(partition[j]<partition[i]){
+						partition[i]=partition[j];
+						change=true;
+					}else{
+						partition[j]=partition[i];
+					}
+				}
+			}
+		}
+		for(int idx=0;idx<NUM_RULES;idx++){
+			int i =partition[idx];
+			int i_1 =partition[i];
+			bool must_go_on=false;
+			while(i_1!=i)
+			{
+				must_go_on=true;
+				i=i_1;
+				i_1=partition[i];
+			}
+			partition[idx]=min(partition[idx],i_1);
+			if(must_go_on){
+				change=true;
+			}
+		}
+		}
+}
+
+
 bool check_compete(int block_a,int block_b, int* rules_size,int * lhs_object){
 	bool res=false;
 	for (unsigned int j=rules_size[block_a]; j<rules_size[block_a+1]; j++){

@@ -12,6 +12,7 @@
 #include <iostream>
 #include "competition.h"
 
+
 namespace matrices{
 
 
@@ -27,33 +28,44 @@ namespace matrices{
 		exit(1);															\
 	} }
 
+
+
 /*
- * Set the matrix to the identity
+ * Set the matrix diagonal
  * */
-__global__ void matrix_identity(unsigned long int * result,unsigned int matrix_size){
+__global__ void matrix_identity_diagonal(unsigned long int * result,unsigned int matrix_size){
 	 unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
-		 if(index<matrix_size*matrix_size){
-			 unsigned int row=index/matrix_size;
-			 unsigned int column=index%matrix_size;
-			 result[index]=row==column;
-		 }
+	 if(index<matrix_size){
+		 result[index*matrix_size+index]=1;
+	 }
 }
 
+void set_identity_matrix(unsigned long int * d_result,int matrix_size){
+	cudaMemset(d_result,0,sizeof(unsigned long int)*matrix_size*matrix_size);
+	static const int BLOCK_SIZE = 256;
+	const int blockCount = (matrix_size+BLOCK_SIZE-1)/BLOCK_SIZE;
+	matrix_identity_diagonal<<<blockCount, BLOCK_SIZE>>>(d_result,matrix_size);
+
+}
 /*
  * Multiplies two squared matrices
  * */
 __global__ void matrix_product(unsigned long int* a,unsigned long int* b,unsigned long int * result,unsigned int matrix_size){
 
 	 unsigned int index = blockIdx.x * blockDim.x + threadIdx.x;
+	 unsigned long int res=0;
+
 	 if(index<matrix_size*matrix_size){
 
 		 unsigned int row=index/matrix_size;
 		 unsigned int column=index%matrix_size;
-		 unsigned long int res=0;
 		 for(int i=0;i<matrix_size;i++){
 			 res+= a[i+row*matrix_size]*b[column+i*matrix_size];
 		 }
-		 __syncthreads();
+	 }
+
+	 if(index<matrix_size*matrix_size){
+
 		 //printf("%i index writes %lu \n",index,res);
 		 result[index]=res;
 	 }
@@ -128,10 +140,12 @@ int test_competition_matrix(){
 
 	cudaMemcpy(matrix, d_matrix, sizeof(long int)*MATRIX_ELEMENTS, cudaMemcpyDeviceToHost);
 
-	matrix_pow(matrix,result,MATRIX_SIZE,MATRIX_SIZE);
 
-	print_matrix(matrix,MATRIX_SIZE,MATRIX_SIZE);
-	print_matrix(result,MATRIX_SIZE,MATRIX_SIZE);
+	matrix_pow(matrix,result,MATRIX_SIZE,1);
+
+
+	//print_matrix(matrix,MATRIX_SIZE,MATRIX_SIZE);
+	//print_matrix(result,MATRIX_SIZE,MATRIX_SIZE);
 
 
 	CUDA_CHECK_RETURN(cudaFree(d_rules_size));
@@ -212,7 +226,7 @@ void matrix_pow_rec(unsigned int pow, unsigned int matrix_size,
 	const int blockCount = (matrix_size*matrix_size + BLOCK_SIZE - 1) / BLOCK_SIZE;
 	unsigned int val = pow;
 
-	matrix_identity<<<blockCount, BLOCK_SIZE>>>(d_aux,matrix_size);
+	set_identity_matrix(d_aux,matrix_size);
 	cudaMemcpy(d_result, d_a, sizeof(long int)*matrix_size*matrix_size, cudaMemcpyDeviceToDevice);
 
 //	printf("aux in ptr %u\n",d_aux);
@@ -337,5 +351,7 @@ int test_matrix_pow_2(){
 
 	return 0;
 }
+
+
 
 }
